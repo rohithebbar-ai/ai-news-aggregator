@@ -1,0 +1,16 @@
+[project]
+name = "ai-news-aggregator"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "dotenv>=0.9.9",
+    "feedparser>=6.0.12",
+    "groq>=1.0.0",
+    "httpx>=0.28.1",
+    "pgvector>=0.4.2",
+    "psycopg2-binary>=2.9.11",
+    "python-dotenv>=1.2.1",
+    "sentence-transformers>=5.2.3",
+]
