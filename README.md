@@ -155,11 +155,19 @@ DATABASE_URL=postgresql://user:pass@ep-xxx.region.aws.neon.tech/db?sslmode=requi
 GROQ_API_KEY=gsk_your_key_here
 ```
 
-Initialize database:
+Initialize database (required before running ingestion). Prefer Python + SQLAlchemy (schema lives in code):
+
+```bash
+uv run python -m app.db.schema
+```
+
+Alternatively, using raw SQL:
 
 ```bash
 psql $DATABASE_URL -f scripts/setup_neon.sql
 ```
+
+Both create the `articles` table and enable the `vector` extension. The SQLAlchemy schema is in `app/db/schema.py` (single source of truth).
 
 Verify setup:
 
@@ -180,7 +188,9 @@ uv run python -m app.daily_runner
 Individual steps:
 
 ```bash
-# Ingestion
+# Ingestion (run both, or full pipeline)
+uv run python -m app.ingestion.run
+# Or per source:
 uv run python -m app.ingestion.rss_scraper
 uv run python -m app.ingestion.youtube_scraper
 

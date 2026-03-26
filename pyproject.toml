@@ -1,9 +1,9 @@
 [project]
 name = "ai-news-aggregator"
 version = "0.1.0"
-description = "Add your description here"
+description = "AI Trend Intelligence Engine - ingestion, embedding, and LLM pipeline"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "dotenv>=0.9.9",
     "feedparser>=6.0.12",
@@ -11,6 +11,19 @@ dependencies = [
     "httpx>=0.28.1",
     "pgvector>=0.4.2",
     "psycopg2-binary>=2.9.11",
+    "beautifulsoup4>=4.12.0",
+    "pydantic>=2.0.0",
     "python-dotenv>=1.2.1",
-    "sentence-transformers>=5.2.3",
+    # Pinned for macOS / Intel compatibility (same as hr-agent)
+    "torch>=2.2.0,<2.3.0",
+    "numpy>=1.24.0,<2.0.0",  
+    "sentence-transformers>=3.0.0,<4.0.0",
+    "transformers>=4.44.0,<4.50.0",
+    "sqlalchemy>=2.0.0",
+    "youtube-transcript-api>=0.6.0",
+]
+
+[tool.uv]
+constraint-dependencies = [
+    "onnxruntime<1.20.0",
 ]
