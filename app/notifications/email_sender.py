@@ -19,21 +19,43 @@ from email.mime.text import MIMEText
 logger = logging.getLogger(__name__)
 
 
-def _build_html(posts: list[dict]) -> str:
-    """Build HTML email body from blog post metadata."""
+def _build_html(posts: list[dict], portfolio_url: str) -> str:
+    """Build HTML email body from blog post metadata with links."""
     items = []
     for post in posts:
         meta = post.get("meta", {})
         title = meta.get("title", post.get("slug", "Untitled"))
         summary = meta.get("summary", "")
-        items.append(f"<h3>{title}</h3><p>{summary}</p><hr>")
+        slug = post.get("slug", "")
+        direction = meta.get("direction", "")
+        confidence = meta.get("confidence", "")
+
+        link = f"{portfolio_url}/blog/{slug}" if portfolio_url and slug else ""
+        read_more = f'<p><a href="{link}" style="color:#4F46E5">→ Read full post</a></p>' if link else ""
+        badge = f'<span style="font-size:12px;color:#6B7280">{direction} · {confidence} confidence</span>' if direction else ""
+
+        items.append(f"""
+        <div style="margin-bottom:24px;padding-bottom:24px;border-bottom:1px solid #E5E7EB">
+          <h3 style="margin:0 0 6px 0;font-size:18px">{title}</h3>
+          {badge}
+          <p style="color:#374151;margin:8px 0">{summary}</p>
+          {read_more}
+        </div>""")
 
     body = "\n".join(items) if items else "<p>No posts this batch.</p>"
     return f"""
-    <html><body>
-    <h2>AI Trend Intelligence — Daily Digest</h2>
-    {body}
-    </body></html>
+    <html>
+    <body style="font-family:sans-serif;max-width:640px;margin:0 auto;padding:24px;color:#111">
+      <h2 style="border-bottom:2px solid #4F46E5;padding-bottom:12px">
+        🤖 AI Trend Intelligence — Daily Digest
+      </h2>
+      <p style="color:#6B7280;margin-bottom:24px">{len(items)} trend{'s' if len(items)!=1 else ''} from today's batch</p>
+      {body}
+      <p style="font-size:12px;color:#9CA3AF;margin-top:32px">
+        Powered by Groq · LangGraph · Neon Postgres
+      </p>
+    </body>
+    </html>
     """
 
 
@@ -79,21 +101,30 @@ def send_digest(session) -> dict:
     from sqlalchemy import select
     from app.db.schema import BlogPostTable, EmailLogTable
 
-    # Fetch latest batch posts
+    # Fetch posts for the latest batch only (not a mix of all batches)
     try:
+        latest = session.execute(
+            select(BlogPostTable.batch_id)
+            .order_by(BlogPostTable.created_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        batch_id = latest or "unknown"
+
         rows = session.execute(
-            select(BlogPostTable).order_by(BlogPostTable.created_at.desc()).limit(10)
+            select(BlogPostTable)
+            .where(BlogPostTable.batch_id == batch_id)
+            .order_by(BlogPostTable.created_at.asc())
         ).scalars().all()
         posts = [{"slug": r.slug, "meta": r.meta} for r in rows]
-        batch_id = rows[0].batch_id if rows else "unknown"
     except Exception as e:
         logger.warning("Could not fetch blog posts: %s", e)
         session.rollback()
         posts = []
         batch_id = "unknown"
 
+    portfolio_url = os.getenv("PORTFOLIO_URL", "").rstrip("/")
     subject = f"AI Trend Intelligence — {len(posts)} new insights"
-    html_body = _build_html(posts)
+    html_body = _build_html(posts, portfolio_url)
 
     from_addr = os.getenv("EMAIL_FROM", "")
     to_addr = os.getenv("EMAIL_TO", "")
@@ -135,7 +166,7 @@ def send_digest(session) -> dict:
             batch_id=batch_id,
             status=result["status"],
             model_used=provider,
-            skip_reason="" if result["status"] == "sent" else result.get("error", ""),
+            skip_reason=result.get("error", ""),
             details_json=result,
         )
         session.add(log)

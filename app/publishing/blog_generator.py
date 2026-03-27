@@ -25,11 +25,20 @@ Given an insight and its source articles (with image URLs), write a full markdow
 
 Return a JSON object with exactly these fields:
 {
-  "title": "<engaging blog title>",
+  "title": "<specific, descriptive title — name the actual technology or development, NOT generic phrases like 'Accelerating X' or 'Advancements in X'>",
   "slug": "<url-safe lowercase hyphenated slug, max 60 chars>",
-  "summary": "<1-2 sentence summary>",
+  "summary": "<2-3 sentences explaining WHAT specifically happened, WHY it matters, and WHO is affected — cite real product names or companies from the evidence>",
   "markdown": "<full markdown content — see format instructions>"
 }
+
+Title rules:
+- BAD: "Accelerating AI Model Development", "Advancements in AI"
+- GOOD: "Google Gemini 2.0 Rewrites the Rules for Multimodal AI", "Why OpenAI's New Safety Spec Changes Developer Trust"
+- Name specific products, companies, or technical breakthroughs
+
+Summary rules:
+- BAD: "This trend is expected to continue with significant implications."
+- GOOD: "Google launched live translation in Pixel earbuds powered by Gemini Nano, marking the first on-device real-time translation. This matters because it works offline, cutting latency from seconds to milliseconds and shifting inference from cloud to edge."
 
 Markdown format to follow exactly:
 ```
@@ -39,10 +48,10 @@ Markdown format to follow exactly:
 ![{hero_title}]({hero_image_url})
 *Source: [{hero_title}]({hero_url})*
 
-{2-3 paragraph introduction based on the analysis}
+{2-3 paragraph introduction — specific facts, product names, numbers from the analysis}
 
 ## Key Developments
-- {bullet points from the analysis}
+- {concrete bullet points — name specific models, tools, companies}
 
 {If second_image_url is available, embed it here:}
 ![{second_title}]({second_image_url})
@@ -52,7 +61,7 @@ Markdown format to follow exactly:
 {historical_context from the insight}
 
 ## What This Means
-{1-2 forward-looking paragraphs}
+{1-2 forward-looking paragraphs with concrete implications}
 
 ## Theme Map
 \`\`\`mermaid
