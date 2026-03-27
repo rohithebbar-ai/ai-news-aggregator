@@ -1,23 +1,26 @@
 """
-Day 9: Email digest sender via AWS SES.
+Day 9: Email digest sender.
 
-Reads the latest batch's blog posts and sends a formatted HTML digest.
-Falls back to a dry-run (prints the email) if AWS credentials are not set.
+Supports three modes (controlled by EMAIL_PROVIDER env var):
+  smtp    — Gmail / any SMTP server (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD)
+  ses     — AWS SES (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION)
+  dry_run — prints email to stdout (default when no credentials set)
 
 Usage: uv run python main.py email
 """
 
-import json
 import logging
 import os
+import smtplib
 import time
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 logger = logging.getLogger(__name__)
 
 
 def _build_html(posts: list[dict]) -> str:
-    """Build a simple HTML email body from blog post metadata."""
-    # Build items from post metadata
+    """Build HTML email body from blog post metadata."""
     items = []
     for post in posts:
         meta = post.get("meta", {})
@@ -34,12 +37,31 @@ def _build_html(posts: list[dict]) -> str:
     """
 
 
+def _send_via_smtp(subject: str, html_body: str, from_addr: str, to_addr: str) -> None:
+    """Send email via SMTP (Gmail or any SMTP server)."""
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = from_addr
+    msg["To"] = to_addr
+    msg.attach(MIMEText(html_body, "html"))
+
+    host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    port = int(os.getenv("SMTP_PORT", "587"))
+    user = os.getenv("SMTP_USER", from_addr)
+    password = os.getenv("SMTP_PASSWORD", "")
+
+    with smtplib.SMTP(host, port) as server:
+        server.starttls()
+        server.login(user, password)
+        server.sendmail(from_addr, to_addr, msg.as_string())
+
+
 def _send_via_ses(subject: str, html_body: str, from_addr: str, to_addr: str) -> dict:
-    """Send email via AWS SES. Returns response dict."""
+    """Send email via AWS SES."""
     import boto3
     region = os.getenv("AWS_REGION", "us-east-1")
     client = boto3.client("ses", region_name=region)
-    response = client.send_email(
+    return client.send_email(
         Source=from_addr,
         Destination={"ToAddresses": [to_addr]},
         Message={
@@ -47,18 +69,17 @@ def _send_via_ses(subject: str, html_body: str, from_addr: str, to_addr: str) ->
             "Body": {"Html": {"Data": html_body}},
         },
     )
-    return response
 
 
 def send_digest(session) -> dict:
     """
-    Read latest blog posts, build digest, send via SES (or dry-run).
-    Returns a log dict for persistence.
+    Read latest blog posts, build digest, send via SMTP / SES / dry-run.
+    Provider selected by EMAIL_PROVIDER env var (smtp | ses | dry_run).
     """
     from sqlalchemy import select
     from app.db.schema import BlogPostTable, EmailLogTable
 
-    # Get latest batch posts
+    # Fetch latest batch posts
     try:
         rows = session.execute(
             select(BlogPostTable).order_by(BlogPostTable.created_at.desc()).limit(10)
@@ -66,9 +87,8 @@ def send_digest(session) -> dict:
         posts = [{"slug": r.slug, "meta": r.meta} for r in rows]
         batch_id = rows[0].batch_id if rows else "unknown"
     except Exception as e:
-        logger.warning("Could not fetch blog posts (schema may need migration): %s", e)
+        logger.warning("Could not fetch blog posts: %s", e)
         session.rollback()
-        rows = []
         posts = []
         batch_id = "unknown"
 
@@ -77,24 +97,34 @@ def send_digest(session) -> dict:
 
     from_addr = os.getenv("EMAIL_FROM", "")
     to_addr = os.getenv("EMAIL_TO", "")
-    has_credentials = bool(from_addr and to_addr and os.getenv("AWS_ACCESS_KEY_ID"))
+    provider = os.getenv("EMAIL_PROVIDER", "dry_run").lower()
 
     start = time.time()
-    result = {"batch_id": batch_id, "post_count": len(posts), "dry_run": not has_credentials}
+    result = {"batch_id": batch_id, "post_count": len(posts), "provider": provider}
 
-    if has_credentials:
+    if provider == "smtp" and from_addr and to_addr:
+        try:
+            _send_via_smtp(subject, html_body, from_addr, to_addr)
+            result["status"] = "sent"
+            logger.info("Email sent via SMTP: %s → %s", from_addr, to_addr)
+        except Exception as e:
+            result["status"] = "failed"
+            result["error"] = str(e)
+            logger.error("SMTP send failed: %s", e)
+
+    elif provider == "ses" and os.getenv("AWS_ACCESS_KEY_ID"):
         try:
             response = _send_via_ses(subject, html_body, from_addr, to_addr)
             result["status"] = "sent"
             result["message_id"] = response.get("MessageId", "")
-            logger.info("Email digest sent: %s → %s", from_addr, to_addr)
+            logger.info("Email sent via SES: %s → %s", from_addr, to_addr)
         except Exception as e:
             result["status"] = "failed"
             result["error"] = str(e)
-            logger.error("Email send failed: %s", e)
+            logger.error("SES send failed: %s", e)
+
     else:
         result["status"] = "dry_run"
-        logger.info("No AWS credentials — dry run. Email would contain %d posts.", len(posts))
         print(f"\n--- DRY RUN EMAIL ---\nSubject: {subject}\n{html_body[:500]}...\n")
 
     result["latency_ms"] = int((time.time() - start) * 1000)
@@ -104,8 +134,8 @@ def send_digest(session) -> dict:
         log = EmailLogTable(
             batch_id=batch_id,
             status=result["status"],
-            model_used="ses",
-            skip_reason="" if has_credentials else "no_aws_credentials",
+            model_used=provider,
+            skip_reason="" if result["status"] == "sent" else result.get("error", ""),
             details_json=result,
         )
         session.add(log)
