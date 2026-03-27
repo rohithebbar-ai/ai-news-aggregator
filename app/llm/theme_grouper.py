@@ -11,7 +11,9 @@ import logging
 import uuid
 from typing import Any
 
-from sqlalchemy import func, select, text
+from datetime import timedelta
+
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.schema import ArticleSummaryTable, ArticleTable, ThemeTable
@@ -41,7 +43,7 @@ def _get_recent_summaries(session: Session) -> list[dict[str, Any]]:
             ArticleTable.source_type,
         )
         .join(ArticleTable, ArticleTable.id == ArticleSummaryTable.article_id)
-        .where(ArticleSummaryTable.created_at > func.now() - text("INTERVAL '48 hours'"))
+        .where(ArticleSummaryTable.created_at > func.now() - timedelta(hours=48))
         .order_by(ArticleSummaryTable.article_id)
     )
     rows = session.execute(stmt).all()
