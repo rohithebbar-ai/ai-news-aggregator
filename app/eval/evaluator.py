@@ -14,6 +14,9 @@ import logging
 import time
 
 import jsonschema
+from sqlalchemy import select
+from app.db.connection import get_session
+from app.db.schema import InsightTable
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +158,7 @@ def log_eval(
         session.flush()
     except Exception as e:
         logger.warning("Failed to log eval result: %s", e)
+        session.rollback()
 
 
 # ---------------------------------------------------------------------------
@@ -237,9 +241,6 @@ def run_eval_for_insight(session, batch_id: str, insight: dict) -> dict:
 
 def run() -> None:
     """Read latest insights from InsightTable, evaluate each one, print summary."""
-    from sqlalchemy import select
-    from app.db.connection import get_session
-    from app.db.schema import InsightTable
 
     print("=== Day 8: Evaluation Pipeline ===")
 

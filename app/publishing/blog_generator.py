@@ -119,13 +119,17 @@ def _build_prompt(insight: dict, articles: list[dict]) -> str:
 
 
 def _save_post(session: Session, batch_id: str, post: dict) -> None:
-    slug = post.get("slug", "post")[:60]
-    # Ensure slug uniqueness within batch
-    existing = session.execute(
-        select(BlogPostTable.slug).where(BlogPostTable.slug == slug)
-    ).scalar_one_or_none()
-    if existing:
-        slug = f"{slug}-{batch_id[:8]}"
+    base_slug = post.get("slug", "post")[:60]
+    # Ensure slug uniqueness: try base, then base-batchprefix, then base-batchprefix-N
+    slug = base_slug
+    for suffix in ["", f"-{batch_id[:8]}"] + [f"-{batch_id[:8]}-{i}" for i in range(2, 10)]:
+        candidate = f"{base_slug}{suffix}"
+        exists = session.execute(
+            select(BlogPostTable.slug).where(BlogPostTable.slug == candidate)
+        ).scalar_one_or_none()
+        if not exists:
+            slug = candidate
+            break
 
     row = BlogPostTable(
         batch_id=batch_id,
@@ -158,10 +162,11 @@ def run() -> None:
             try:
                 post = call_llm_json(SYSTEM_PROMPT, prompt, temperature=0.5)
                 _save_post(session, batch_id, post)
-                logger.info("  ✓ %s", post.get("title", "?"))
+                logger.info("%s", post.get("title", "?"))
                 success += 1
             except Exception as e:
-                logger.error("  ✗ Failed for insight '%s': %s", insight.get("trend_name", "?"), e)
+                logger.error("Failed for insight '%s': %s", insight.get("trend_name", "?"), e)
+                session.rollback()
 
     print(f"Blog generation complete: {success}/{len(insights)} posts created for batch {batch_id}.")
 

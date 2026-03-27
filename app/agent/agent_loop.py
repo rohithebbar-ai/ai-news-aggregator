@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import warnings
+import re
 
 from dotenv import load_dotenv
 from langchain_core.tools import tool
@@ -103,6 +104,10 @@ def run_agent_for_theme(session, theme: dict, article_urls: dict) -> dict:
     # Strip markdown fences if present
     if "```" in last_msg:
         last_msg = last_msg.split("```")[1].lstrip("json").strip()
+    # Remove all control characters invalid in JSON (literal \x00-\x1f, \x7f)
+    # Escaped sequences like \\n in the JSON text are unaffected (they're 0x5C + 0x6E)
+  
+    last_msg = re.sub(r"[\x00-\x1f\x7f]", "", last_msg)
 
     return json.loads(last_msg)
 
