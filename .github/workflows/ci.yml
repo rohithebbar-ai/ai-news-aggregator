@@ -28,6 +28,8 @@ jobs:
           from app.llm.synthesizer import run as synthesizer_run
           from app.agent.agent_loop import run as agent_run
           from app.publishing.blog_generator import run as blog_run
+          from app.eval.evaluator import run as eval_run
+          from app.notifications.email_sender import run as email_run
           print('All imports OK')
           "
         env:
