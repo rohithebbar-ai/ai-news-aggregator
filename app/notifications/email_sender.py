@@ -31,14 +31,22 @@ def _build_html(posts: list[dict], portfolio_url: str) -> str:
         confidence = meta.get("confidence", "")
 
         link = f"{portfolio_url}/blog/{slug}" if portfolio_url and slug else ""
-        read_more = f'<p><a href="{link}" style="color:#4F46E5">→ Read full post</a></p>' if link else ""
+        read_more = f'<p><a href="{link}" style="color:#4F46E5;font-weight:600">→ Read full post</a></p>' if link else ""
         badge = f'<span style="font-size:12px;color:#6B7280">{direction} · {confidence} confidence</span>' if direction else ""
+
+        sources = meta.get("sources", [])
+        source_links = " · ".join(
+            f'<a href="{s["url"]}" style="color:#6B7280;font-size:12px">{s["title"][:50]}</a>'
+            for s in sources[:3] if s.get("url")
+        )
+        sources_html = f'<p style="margin:6px 0">📰 Sources: {source_links}</p>' if source_links else ""
 
         items.append(f"""
         <div style="margin-bottom:24px;padding-bottom:24px;border-bottom:1px solid #E5E7EB">
           <h3 style="margin:0 0 6px 0;font-size:18px">{title}</h3>
           {badge}
           <p style="color:#374151;margin:8px 0">{summary}</p>
+          {sources_html}
           {read_more}
         </div>""")
 

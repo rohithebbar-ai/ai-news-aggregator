@@ -127,7 +127,7 @@ def _build_prompt(insight: dict, articles: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _save_post(session: Session, batch_id: str, post: dict) -> None:
+def _save_post(session: Session, batch_id: str, post: dict, evidence_articles: list[dict] | None = None) -> None:
     base_slug = post.get("slug", "post")[:60]
     # Ensure slug uniqueness: try base, then base-batchprefix, then base-batchprefix-N
     slug = base_slug
@@ -140,6 +140,11 @@ def _save_post(session: Session, batch_id: str, post: dict) -> None:
             slug = candidate
             break
 
+    sources = [
+        {"title": a["title"], "url": a["url"]}
+        for a in (evidence_articles or [])
+        if a.get("url")
+    ]
     row = BlogPostTable(
         batch_id=batch_id,
         slug=slug,
@@ -147,6 +152,7 @@ def _save_post(session: Session, batch_id: str, post: dict) -> None:
         meta={
             "title": post.get("title", ""),
             "summary": post.get("summary", ""),
+            "sources": sources,
         },
     )
     session.add(row)
@@ -170,7 +176,7 @@ def run() -> None:
             prompt = _build_prompt(insight, articles)
             try:
                 post = call_llm_json(SYSTEM_PROMPT, prompt, temperature=0.5)
-                _save_post(session, batch_id, post)
+                _save_post(session, batch_id, post, evidence_articles=articles)
                 logger.info("%s", post.get("title", "?"))
                 success += 1
             except Exception as e:
