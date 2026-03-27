@@ -1,4 +1,4 @@
-from app.embeddings.embed_service import embed_batch, embed_text, run_batch
+from app.embeddings.embed_service import embed_batch, embed_text, run
 from app.embeddings.vector_store import (
     get_unembedded_articles,
     search_by_text,
@@ -9,7 +9,7 @@ from app.embeddings.vector_store import (
 __all__ = [
     "embed_batch",
     "embed_text",
-    "run_batch",
+    "run",
     "get_unembedded_articles",
     "search_by_text",
     "similar_articles",
