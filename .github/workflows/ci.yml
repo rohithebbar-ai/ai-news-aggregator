@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        run: uv sync
+      - name: Validate imports
+        run: |
+          uv run python -c "
+          from app.ingestion.run import run as ingest_run
+          from app.embeddings.embed_service import run as embed_run
+          from app.llm.summarizer import run as summarizer_run
+          from app.llm.theme_grouper import run as grouper_run
+          from app.llm.synthesizer import run as synthesizer_run
+          from app.agent.agent_loop import run as agent_run
+          from app.publishing.blog_generator import run as blog_run
+          print('All imports OK')
+          "
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
