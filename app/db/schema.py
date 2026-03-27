@@ -108,6 +108,18 @@ class InsightTable(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
 
 
+class EmailLogTable(Base):
+    __tablename__ = "email_logs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    batch_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False)          # sent | failed | dry_run
+    model_used: Mapped[str] = mapped_column(Text, nullable=False)      # "ses"
+    skip_reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    details_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
+
+
 # ---------------------------------------------------------------------------
 # Day 7: Blog post output table
 # ---------------------------------------------------------------------------

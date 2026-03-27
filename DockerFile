@@ -1,17 +1,20 @@
-FROM python:3.12-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
 # Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+RUN pip install uv
 
-# Copy dependency files
-COPY pyproject.toml uv.lock ./
+# Copy dependency files first (layer caching)
+COPY pyproject.toml .
+COPY uv.lock* .
 
 # Install dependencies
-RUN uv sync --frozen --no-dev
+RUN uv sync --no-dev
 
 # Copy source code
 COPY . .
 
-CMD ["uv", "run", "python", "tests/test_setup.py"]
+# Default: print help. Override with: docker run <image> ingest
+ENTRYPOINT ["uv", "run", "python", "main.py"]
+CMD []
