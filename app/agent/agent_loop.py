@@ -10,10 +10,14 @@ Usage: uv run python -m app.agent.agent_loop
 import json
 import logging
 import os
+import warnings
 
 from dotenv import load_dotenv
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
+
+# Suppress langgraph v1 deprecation warning — create_react_agent still works until v2
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="langgraph")
 from langgraph.prebuilt import create_react_agent
 
 load_dotenv()
