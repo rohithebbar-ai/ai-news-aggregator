@@ -12,6 +12,8 @@ Stages:
   synthesize — Stage 3: synthesize insights per theme (direct)
   agent      — Stage 3 (agentic): ReAct agent loop for richer insights
   blog       — Stage 4: generate blog posts from insights
+  eval       — Stage 4: evaluate insight quality (schema, coherence, novelty)
+  email      — Stage 5: send email digest via AWS SES
 """
 
 import sys
@@ -46,6 +48,14 @@ def main():
 
     elif stage == "blog":
         from app.publishing.blog_generator import run
+        run()
+
+    elif stage == "eval":
+        from app.eval.evaluator import run
+        run()
+
+    elif stage == "email":
+        from app.notifications.email_sender import run
         run()
 
     else:
