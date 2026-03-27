@@ -12,7 +12,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 import uuid as _uuid
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -108,6 +108,18 @@ class InsightTable(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
 
 
+class EmailLogTable(Base):
+    __tablename__ = "email_logs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    batch_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False)          # sent | failed | dry_run
+    model_used: Mapped[str] = mapped_column(Text, nullable=False)      # "ses"
+    skip_reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    details_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
+
+
 # ---------------------------------------------------------------------------
 # Day 7: Blog post output table
 # ---------------------------------------------------------------------------
@@ -120,6 +132,23 @@ class BlogPostTable(Base):
     slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     markdown: Mapped[str] = mapped_column(Text, nullable=False)
     meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
+
+
+# ---------------------------------------------------------------------------
+# Day 8: Evaluation log table
+# ---------------------------------------------------------------------------
+
+class EvalLogTable(Base):
+    __tablename__ = "eval_logs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    batch_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    stage: Mapped[str] = mapped_column(Text, nullable=False)        # e.g. "insight"
+    eval_type: Mapped[str] = mapped_column(Text, nullable=False)    # "schema" | "coherence" | "novelty"
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    details_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    latency_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
 
 
