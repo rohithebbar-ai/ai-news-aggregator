@@ -15,11 +15,15 @@ dependencies = [
     "python-dotenv>=1.2.1",
     # Pinned for macOS / Intel compatibility (same as hr-agent)
     "torch>=2.2.0,<2.3.0",
-    "numpy>=1.24.0,<2.0.0",  
+    "numpy>=1.24.0,<2.0.0",
     "sentence-transformers>=3.0.0,<4.0.0",
     "transformers>=4.44.0,<4.50.0",
     "sqlalchemy>=2.0.0",
     "youtube-transcript-api>=0.6.0",
+    "fastmcp>=2.0.0",
+    "langgraph>=0.2.0",
+    "langchain-openai>=0.2.0",
+    "langchain-core>=0.3.0",
 ]
 
 [tool.uv]
