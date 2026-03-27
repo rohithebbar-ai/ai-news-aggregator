@@ -108,6 +108,21 @@ class InsightTable(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
 
 
+# ---------------------------------------------------------------------------
+# Day 7: Blog post output table
+# ---------------------------------------------------------------------------
+
+class BlogPostTable(Base):
+    __tablename__ = "blog_posts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    batch_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    markdown: Mapped[str] = mapped_column(Text, nullable=False)
+    meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
+
+
 def create_all_tables() -> None:
     """Create all tables and enable pgvector. Uses DATABASE_URL from env."""
     from sqlalchemy import create_engine
