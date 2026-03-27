@@ -58,7 +58,7 @@ def _prepare_text(title: str, summary: str | None, raw_content: str) -> str:
     return body[:2000]
 
 
-def run_batch() -> None:
+def run() -> None:
     """Embed all articles that don't yet have an embedding row."""
     from app.db.connection import get_session
     from app.embeddings.vector_store import get_unembedded_articles, upsert_embedding
@@ -78,4 +78,4 @@ def run_batch() -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    run_batch()
+    run()
