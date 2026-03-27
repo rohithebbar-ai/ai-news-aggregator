@@ -5,13 +5,13 @@ Usage:
   uv run python main.py <stage>
 
 Stages:
-  ingest    — scrape RSS + YouTube, deduplicate, store articles
-  embed     — embed unembedded articles with MiniLM
-  summarize — Stage 1: summarize each article via Groq
-  group     — Stage 2: group articles into themes
+  ingest     — scrape RSS + YouTube, deduplicate, store articles
+  embed      — embed unembedded articles with MiniLM
+  summarize  — Stage 1: summarize each article via Groq
+  group      — Stage 2: group articles into themes
   synthesize — Stage 3: synthesize insights per theme (direct)
-  agent     — Stage 3 (agentic): ReAct agent loop for richer insights
-  blog      — Stage 4: generate blog posts from insights
+  agent      — Stage 3 (agentic): ReAct agent loop for richer insights
+  blog       — Stage 4: generate blog posts from insights
 """
 
 import sys
