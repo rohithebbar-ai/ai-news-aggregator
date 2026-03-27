@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def main() -> None:
+def run() -> None:
     rss = RSSScraper()
     yt = YouTubeScraper()
     rss_articles = rss.scrape()
@@ -35,4 +35,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run()
