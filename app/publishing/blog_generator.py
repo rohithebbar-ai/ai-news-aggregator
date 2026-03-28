@@ -66,8 +66,16 @@ Markdown format to follow exactly:
 ## Theme Map
 \`\`\`mermaid
 graph LR
-  {2-4 node diagram connecting sub-themes to the main trend — keep it simple}
+  A[Sub-theme 1] --> B[Main Trend]
+  C[Sub-theme 2] --> B
+  B --> D[Outcome]
 \`\`\`
+
+Mermaid syntax rules — follow exactly:
+- Edges: A --> B  or  A -->|label| B  (never use |label|> — no trailing >)
+- Node labels in square brackets only: A[Label text]
+- No special characters inside labels (no quotes, colons, slashes)
+- Max 4 nodes, keep labels under 30 chars
 
 ---
 *Confidence: {confidence_level} | Direction: {direction}*
