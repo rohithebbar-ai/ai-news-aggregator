@@ -267,7 +267,7 @@ def _validate_mermaid(markdown: str) -> str:
 
     def check_block(match: re.Match) -> str:
         body = match.group(1)
-        lines = [l.strip() for l in body.splitlines() if l.strip()]
+        lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
         for line in lines:
             if "|>" in line:
                 logger.warning("Mermaid block removed: invalid edge label '|>' in: %r", line)
@@ -357,6 +357,12 @@ def _save_post(session: Session, batch_id: str, post: dict, evidence_articles: l
 
 
 def run() -> None:
+    try:
+        from app.publishing.figure_generator import generate_trend_figure as _gen_figure
+        _figure_enabled = True
+    except ImportError:
+        _figure_enabled = False
+
     from app.db.connection import get_session
 
     with get_session() as session:
@@ -383,8 +389,36 @@ def run() -> None:
                 tl = _generate_title_lede(insight, articles)
                 outline_section += f"\n  Suggested title: {tl.get('title', '')}\n  Opening lede: {tl.get('lede', '')}"
                 post = call_llm_json(SYSTEM_PROMPT, prompt + outline_section, temperature=_BODY_TEMPERATURE)
-                if post.get("markdown"):
-                    post["markdown"] = _validate_mermaid(post["markdown"])
+                raw_md = post.get("markdown", "")
+                clean_md = _validate_mermaid(raw_md)
+                _mermaid_stripped = (
+                    "```mermaid" in raw_md and "```mermaid" not in clean_md
+                )
+                post["markdown"] = clean_md
+                # Inject a Groq-generated matplotlib figure when:
+                # (a) the mermaid block was stripped as invalid, or
+                # (b) the insight has no scraped hero image available
+                _has_hero_image = any(a.get("image") for a in articles)
+                if _figure_enabled and (_mermaid_stripped or not _has_hero_image):
+                    try:
+                        fig_uri = _gen_figure(insight, articles)
+                        if fig_uri:
+                            trend_label = insight.get("trend_name", "Trend Overview")[:60]
+                            figure_section = (
+                                f"\n## Trend Overview\n\n"
+                                f"![{trend_label}]({fig_uri})\n"
+                                f"*Data-driven visualization of: {trend_label}*\n"
+                            )
+                            # When mermaid was stripped it left a gap mid-post; insert before
+                            # the trailing footer line. Otherwise append at the end.
+                            if _mermaid_stripped and "\n---\n" in post["markdown"]:
+                                post["markdown"] = post["markdown"].replace(
+                                    "\n---\n", figure_section + "\n---\n", 1
+                                )
+                            else:
+                                post["markdown"] = post["markdown"] + figure_section
+                    except Exception as _fig_err:
+                        logger.warning("Figure generation failed: %s", _fig_err)
                 ok, reason = _validate_post(post, insight)
                 if not ok:
                     logger.warning("Post rejected for '%s': %s", insight.get("trend_name", "?"), reason)
