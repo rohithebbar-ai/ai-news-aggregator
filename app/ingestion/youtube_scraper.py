@@ -6,7 +6,7 @@ and returns Article models (transcript as raw_content).
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import feedparser  # type: ignore[import-untyped]
@@ -73,11 +73,7 @@ class YouTubeScraper(BaseScraper):
         self.user_agent = user_agent or HTTP_USER_AGENT
 
     def scrape(self) -> list[Article]:
-        try:
-            from datetime import timedelta
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=self.lookback_hours)
-        except Exception:
-            cutoff = datetime.now(timezone.utc)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=self.lookback_hours)
 
         articles: list[Article] = []
         for channel_id in self.channel_ids:

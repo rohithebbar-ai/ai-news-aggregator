@@ -12,7 +12,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 import uuid as _uuid
 
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Index, String, Text, text
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Index, String, Text, create_engine, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -34,8 +34,8 @@ class ArticleTable(Base):
     __tablename__ = "articles"
     __table_args__ = (
         Index("idx_articles_source_type", "source_type"),
-        Index("idx_articles_published_at", "published_at", postgresql_ops={"published_at": "DESC"}),
-        Index("idx_articles_created_at", "created_at", postgresql_ops={"created_at": "DESC"}),
+        Index("idx_articles_published_at", "published_at"),
+        Index("idx_articles_created_at", "created_at"),
     )
 
     id: Mapped[_uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid.uuid4)
@@ -154,7 +154,6 @@ class EvalLogTable(Base):
 
 def create_all_tables() -> None:
     """Create all tables and enable pgvector. Uses DATABASE_URL from env."""
-    from sqlalchemy import create_engine
     url = os.getenv("DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL environment variable is not set")

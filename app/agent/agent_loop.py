@@ -101,13 +101,17 @@ def run_agent_for_theme(session, theme: dict, article_urls: dict) -> dict:
 
     # Extract last AI message content
     last_msg = result["messages"][-1].content
-    # Strip markdown fences if present
+
+    # Extract content from the last fenced code block (handles multiple fences correctly).
+    # The regex captures everything between ``` markers, optionally preceded by a language tag.
     if "```" in last_msg:
-        last_msg = last_msg.split("```")[1].lstrip("json").strip()
-    # Remove all control characters invalid in JSON (literal \x00-\x1f, \x7f)
-    # Escaped sequences like \\n in the JSON text are unaffected (they're 0x5C + 0x6E)
-  
-    last_msg = re.sub(r"[\x00-\x1f\x7f]", "", last_msg)
+        fenced_blocks = re.findall(r"```(?:json)?\s*(.*?)```", last_msg, re.DOTALL)
+        if fenced_blocks:
+            last_msg = fenced_blocks[-1].strip()
+
+    # Remove only true control characters that are invalid inside JSON strings.
+    # Preserve \x09 (tab), \x0a (newline), \x0d (carriage return) — valid JSON whitespace.
+    last_msg = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", last_msg)
 
     return json.loads(last_msg)
 

@@ -146,19 +146,18 @@ def log_eval(
     try:
         from app.db.schema import EvalLogTable
 
-        row = EvalLogTable(
-            batch_id=batch_id,
-            stage=stage,
-            eval_type=eval_type,
-            score=score,
-            details_json=details,
-            latency_ms=latency_ms,
-        )
-        session.add(row)
-        session.flush()
+        with session.begin_nested():
+            row = EvalLogTable(
+                batch_id=batch_id,
+                stage=stage,
+                eval_type=eval_type,
+                score=score,
+                details_json=details,
+                latency_ms=latency_ms,
+            )
+            session.add(row)
     except Exception as e:
         logger.warning("Failed to log eval result: %s", e)
-        session.rollback()
 
 
 # ---------------------------------------------------------------------------

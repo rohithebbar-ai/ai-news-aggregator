@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from html import unescape
 from typing import Any
 
@@ -99,12 +99,7 @@ class RSSScraper(BaseScraper):
         self.user_agent = user_agent or HTTP_USER_AGENT
 
     def scrape(self) -> list[Article]:
-        cutoff = datetime.now(timezone.utc)
-        try:
-            from datetime import timedelta
-            cutoff = cutoff - timedelta(hours=self.lookback_hours)
-        except Exception:
-            pass
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=self.lookback_hours)
 
         articles: list[Article] = []
         for feed_url in self.feed_urls:

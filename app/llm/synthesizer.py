@@ -35,22 +35,26 @@ Return ONLY valid JSON. No markdown, no explanation."""
 
 
 def _get_latest_themes(session: Session) -> tuple[str, list[dict[str, Any]]]:
-    """Get themes from the most recent batch."""
-    stmt = (
-        select(ThemeTable.batch_id, ThemeTable.theme_json)
-        .order_by(ThemeTable.created_at.desc())
-    )
-    rows = session.execute(stmt).all()
-    if not rows:
+    """Get all themes from the most recent batch using a two-step SQL query."""
+    # Step 1: find the batch_id of the most recently created theme
+    latest_batch_id: str | None = session.execute(
+        select(ThemeTable.batch_id).order_by(ThemeTable.created_at.desc()).limit(1)
+    ).scalar_one_or_none()
+
+    if not latest_batch_id:
         return "", []
-    batch_id = rows[0].batch_id
+
+    # Step 2: fetch ALL themes for that batch_id (no Python-side break needed)
+    rows = session.execute(
+        select(ThemeTable.theme_json).where(ThemeTable.batch_id == latest_batch_id)
+    ).all()
+
     themes = []
     for r in rows:
-        if r.batch_id != batch_id:
-            break
         data = r.theme_json if isinstance(r.theme_json, dict) else json.loads(r.theme_json)
         themes.append(data)
-    return batch_id, themes
+
+    return latest_batch_id, themes
 
 
 def _get_article_urls(session: Session, article_ids: list[uuid.UUID | str]) -> dict[str, str]:

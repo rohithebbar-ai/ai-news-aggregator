@@ -184,12 +184,12 @@ def run() -> None:
             prompt = _build_prompt(insight, articles)
             try:
                 post = call_llm_json(SYSTEM_PROMPT, prompt, temperature=0.5)
-                _save_post(session, batch_id, post, evidence_articles=articles)
+                with session.begin_nested():
+                    _save_post(session, batch_id, post, evidence_articles=articles)
                 logger.info("%s", post.get("title", "?"))
                 success += 1
             except Exception as e:
                 logger.error("Failed for insight '%s': %s", insight.get("trend_name", "?"), e)
-                session.rollback()
 
     print(f"Blog generation complete: {success}/{len(insights)} posts created for batch {batch_id}.")
 

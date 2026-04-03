@@ -43,24 +43,24 @@ class ArticleRepository:
         inserted = 0
         for a in articles:
             try:
-                stmt = (
-                    insert(ArticleTable)
-                    .values(
-                        url=a.url,
-                        title=a.title,
-                        summary=a.summary,
-                        raw_content=a.raw_content,
-                        published_at=a.published_at,
-                        image=a.image,
-                        images=[img.model_dump() for img in a.images] if a.images else None,
-                        source_type=a.source_type,
-                        source_url=a.source_url,
+                with self._session.begin_nested():
+                    stmt = (
+                        insert(ArticleTable)
+                        .values(
+                            url=a.url,
+                            title=a.title,
+                            summary=a.summary,
+                            raw_content=a.raw_content,
+                            published_at=a.published_at,
+                            image=a.image,
+                            images=[img.model_dump() for img in a.images] if a.images else None,
+                            source_type=a.source_type,
+                            source_url=a.source_url,
+                        )
+                        .on_conflict_do_nothing(index_elements=["url"])
                     )
-                    .on_conflict_do_nothing(index_elements=["url"])
-                )
-                result = self._session.execute(stmt)
-                inserted += result.rowcount
+                    result = self._session.execute(stmt)
+                    inserted += result.rowcount
             except Exception as e:
                 logger.warning("Insert failed for url=%s: %s", a.url, e)
-        self._session.flush()
         return inserted
