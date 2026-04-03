@@ -10,18 +10,14 @@ Usage: uv run python -m app.agent.agent_loop
 import json
 import logging
 import os
-import warnings
 import re
 
 from dotenv import load_dotenv
-from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
-
-# Suppress langgraph v1 deprecation warning — create_react_agent still works until v2
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="langgraph")
-from langgraph.prebuilt import create_react_agent
 
 load_dotenv()
+
+# LangChain / LangGraph are imported lazily inside run_agent_for_theme / _make_tools so that
+# `import app.agent.agent_loop` does not load large dependency stacks until the agent stage runs.
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +41,7 @@ Return ONLY a valid JSON object with exactly these fields:
 
 def _make_tools(session):
     """Build LangChain tools bound to the current DB session."""
+    from langchain_core.tools import tool
 
     @tool
     def rag_search(query: str) -> str:
@@ -72,31 +69,41 @@ def _make_tools(session):
     return [rag_search, get_recent_themes]
 
 
-def _build_prompt(theme: dict, article_urls: dict) -> str:
+def _build_prompt(theme: dict, article_urls: dict, article_ids: list) -> str:
     lines = [
         f"Theme: {theme.get('theme_name', 'unknown')}",
         f"Description: {theme.get('description', '')}",
         "Current articles:",
     ]
-    for aid in theme.get("article_ids", []):
+    for aid in article_ids:
         url = article_urls.get(str(aid), f"article #{aid}")
         lines.append(f"  - {url}")
     return "\n".join(lines)
 
 
-def run_agent_for_theme(session, theme: dict, article_urls: dict) -> dict:
+def run_agent_for_theme(
+    session, theme: dict, article_urls: dict, article_ids: list, *, groq_api_key: str
+) -> dict:
     """Run the ReAct agent for a single theme and return the insight dict."""
+    import warnings
+
+    from langchain_openai import ChatOpenAI
+    from langgraph.prebuilt import create_react_agent
+
+    # Suppress langgraph v1 deprecation warning — create_react_agent still works until v2
+    warnings.filterwarnings("ignore", category=DeprecationWarning, module="langgraph")
+
     # Use Groq's OpenAI-compatible endpoint — avoids langchain-groq/groq version conflict
     llm = ChatOpenAI(
         model="llama-3.3-70b-versatile",
-        api_key=os.getenv("GROQ_API_KEY", ""),
+        api_key=groq_api_key,  # type: ignore[arg-type]
         base_url="https://api.groq.com/openai/v1",
         temperature=0.3,
     )
     tools = _make_tools(session)
     agent = create_react_agent(llm, tools, prompt=SYSTEM_PROMPT)
 
-    prompt = _build_prompt(theme, article_urls)
+    prompt = _build_prompt(theme, article_urls, article_ids)
     result = agent.invoke({"messages": [("user", prompt)]})
 
     # Extract last AI message content
@@ -118,8 +125,19 @@ def run_agent_for_theme(session, theme: dict, article_urls: dict) -> dict:
 
 def run() -> None:
     """Run the agent loop for all themes in the latest batch."""
+    groq_key = os.getenv("GROQ_API_KEY", "")
+    if not groq_key.strip():
+        raise RuntimeError(
+            "GROQ_API_KEY is missing, empty, or whitespace-only; set a valid key in the "
+            "environment before running the agent loop."
+        )
     from app.db.connection import get_session as db_session
-    from app.llm.synthesizer import _get_article_urls, _get_latest_themes, _persist_insight
+    from app.llm.synthesizer import (
+        _get_article_urls,
+        _get_latest_themes,
+        _parse_valid_article_ids,
+        _persist_insight,
+    )
 
     with db_session() as session:
         batch_id, themes = _get_latest_themes(session)
@@ -130,11 +148,13 @@ def run() -> None:
         logger.info("Agent loop: processing %d themes (batch %s)", len(themes), batch_id)
         success = 0
         for theme in themes:
-            article_ids = theme.get("article_ids", [])
+            article_ids = _parse_valid_article_ids(theme.get("article_ids", []))
             article_urls = _get_article_urls(session, article_ids)
             theme_name = theme.get("theme_name", "?")
             try:
-                insight = run_agent_for_theme(session, theme, article_urls)
+                insight = run_agent_for_theme(
+                    session, theme, article_urls, article_ids, groq_api_key=groq_key
+                )
                 _persist_insight(session, batch_id, insight)
                 logger.info("  ✓ %s (%s)", insight.get("trend_name", "?"), insight.get("direction", "?"))
                 success += 1

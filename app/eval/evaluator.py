@@ -14,9 +14,11 @@ import logging
 import time
 
 import jsonschema
-from sqlalchemy import select
+from sqlalchemy import Integer, cast, select
+
+from app.config import COHERENCE_EVAL_MODEL
 from app.db.connection import get_session
-from app.db.schema import InsightTable
+from app.db.schema import EvalLogTable, InsightTable
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +68,10 @@ def score_coherence(insight: dict) -> tuple[int, str]:
     """
     Ask the LLM to score the insight for coherence, relevance, and quality (1-5).
 
+    Uses COHERENCE_EVAL_MODEL (distinct from the synthesis default model) to reduce circular self-assessment.
+
     Returns (score: int, reason: str).
-    On any error, returns (3, "eval failed") to avoid breaking the pipeline.
+    On any error, returns (2, "eval failed") so the run does not pass coherence (threshold >= 3).
     """
     try:
         from app.llm.groq_client import call_llm_json
@@ -79,8 +83,12 @@ def score_coherence(insight: dict) -> tuple[int, str]:
         )
         user_prompt = json.dumps(insight)
 
-        result = call_llm_json(system_prompt, user_prompt)
-        score = int(result.get("score", 3))
+        result = call_llm_json(
+            system_prompt,
+            user_prompt,
+            model=COHERENCE_EVAL_MODEL,
+        )
+        score = int(result.get("score", 2))
         reason = str(result.get("reason", ""))
         # clamp to valid range
         score = max(1, min(5, score))
@@ -88,7 +96,7 @@ def score_coherence(insight: dict) -> tuple[int, str]:
 
     except Exception as e:
         logger.warning("Coherence scoring failed: %s", e)
-        return 3, "eval failed"
+        return 2, "eval failed"
 
 
 # ---------------------------------------------------------------------------
@@ -144,8 +152,6 @@ def log_eval(
     Wrapped in try/except so logging never crashes the main pipeline.
     """
     try:
-        from app.db.schema import EvalLogTable
-
         with session.begin_nested():
             row = EvalLogTable(
                 batch_id=batch_id,
@@ -164,7 +170,7 @@ def log_eval(
 # 5. Run eval for a single insight
 # ---------------------------------------------------------------------------
 
-def run_eval_for_insight(session, batch_id: str, insight: dict) -> dict:
+def run_eval_for_insight(session, batch_id: str, insight: dict, insight_id: int) -> dict:
     """
     Run all three eval checks on one insight dict.
 
@@ -187,7 +193,7 @@ def run_eval_for_insight(session, batch_id: str, insight: dict) -> dict:
         stage="insight",
         eval_type="schema",
         score=1.0 if schema_valid else 0.0,
-        details={"valid": schema_valid, "reason": schema_reason},
+        details={"insight_id": insight_id, "valid": schema_valid, "reason": schema_reason},
         latency_ms=schema_latency,
     )
 
@@ -202,7 +208,7 @@ def run_eval_for_insight(session, batch_id: str, insight: dict) -> dict:
         stage="insight",
         eval_type="coherence",
         score=float(coherence_score),
-        details={"score": coherence_score, "reason": coherence_reason},
+        details={"insight_id": insight_id, "score": coherence_score, "reason": coherence_reason},
         latency_ms=coherence_latency,
     )
 
@@ -217,7 +223,11 @@ def run_eval_for_insight(session, batch_id: str, insight: dict) -> dict:
         stage="insight",
         eval_type="novelty",
         score=float(max_similarity),
-        details={"is_novel": is_novel, "max_similarity": max_similarity},
+        details={
+            "insight_id": insight_id,
+            "is_novel": is_novel,
+            "max_similarity": max_similarity,
+        },
         latency_ms=novelty_latency,
     )
 
@@ -244,8 +254,18 @@ def run() -> None:
     print("=== Day 8: Evaluation Pipeline ===")
 
     with get_session() as session:
+        insight_id_txt = EvalLogTable.details_json["insight_id"].astext
+        evaluated_ids_subq = (
+            select(cast(insight_id_txt, Integer))
+            .select_from(EvalLogTable)
+            .where(insight_id_txt.isnot(None))
+            .distinct()
+        )
         rows = session.execute(
-            select(InsightTable).order_by(InsightTable.created_at.desc()).limit(20)
+            select(InsightTable)
+            .where(~InsightTable.id.in_(evaluated_ids_subq))
+            .order_by(InsightTable.created_at.desc())
+            .limit(20)
         ).scalars().all()
 
         if not rows:
@@ -258,7 +278,7 @@ def run() -> None:
         for row in rows:
             batch_id = str(row.batch_id)
             insight = row.insight_json
-            result = run_eval_for_insight(session, batch_id, insight)
+            result = run_eval_for_insight(session, batch_id, insight, row.id)
             results.append(result)
 
         session.commit()

@@ -9,14 +9,32 @@ Supports three modes (controlled by EMAIL_PROVIDER env var):
 Usage: uv run python main.py email
 """
 
+import html
 import logging
 import os
 import smtplib
 import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_http_href(url: str) -> str | None:
+    """
+    Allow only http/https with a non-empty netloc for use in href.
+    Returns HTML-escaped URL safe for a double-quoted attribute, or None if disallowed.
+    """
+    if not url or not isinstance(url, str):
+        return None
+    url = url.strip()
+    if not url:
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return None
+    return html.escape(url, quote=True)
 
 
 def _build_html(posts: list[dict], portfolio_url: str) -> str:
@@ -24,21 +42,42 @@ def _build_html(posts: list[dict], portfolio_url: str) -> str:
     items = []
     for post in posts:
         meta = post.get("meta", {})
-        title = meta.get("title", post.get("slug", "Untitled"))
-        summary = meta.get("summary", "")
+        raw_title = meta.get("title", post.get("slug", "Untitled"))
+        title = html.escape(str(raw_title))
+        summary = html.escape(str(meta.get("summary", "")))
         slug = post.get("slug", "")
-        direction = meta.get("direction", "")
-        confidence = meta.get("confidence", "")
+        direction = html.escape(str(meta.get("direction", "")))
+        confidence = html.escape(str(meta.get("confidence", "")))
 
-        link = f"{portfolio_url}/blog/{slug}" if portfolio_url and slug else ""
-        read_more = f'<p><a href="{link}" style="color:#4F46E5;font-weight:600">→ Read full post</a></p>' if link else ""
-        badge = f'<span style="font-size:12px;color:#6B7280">{direction} · {confidence} confidence</span>' if direction else ""
+        post_href: str | None = None
+        if portfolio_url and slug:
+            post_href = _safe_http_href(f"{portfolio_url.rstrip('/')}/blog/{slug}")
+        read_more = (
+            f'<p><a href="{post_href}" style="color:#4F46E5;font-weight:600">→ Read full post</a></p>'
+            if post_href
+            else ""
+        )
+        badge = (
+            f'<span style="font-size:12px;color:#6B7280">{direction} · {confidence} confidence</span>'
+            if direction
+            else ""
+        )
 
         sources = meta.get("sources", [])
-        source_links = " · ".join(
-            f'<a href="{s["url"]}" style="color:#6B7280;font-size:12px">{s["title"][:50]}</a>'
-            for s in sources[:3] if s.get("url")
-        )
+        source_parts: list[str] = []
+        for s in sources[:3]:
+            if not isinstance(s, dict):
+                continue
+            stitle = html.escape(str((s.get("title") or ""))[:50])
+            surl = s.get("url")
+            href = _safe_http_href(str(surl)) if surl else None
+            if href and stitle:
+                source_parts.append(
+                    f'<a href="{href}" style="color:#6B7280;font-size:12px">{stitle}</a>'
+                )
+            elif stitle:
+                source_parts.append(stitle)
+        source_links = " · ".join(source_parts)
         sources_html = f'<p style="margin:6px 0">📰 Sources: {source_links}</p>' if source_links else ""
 
         items.append(f"""
@@ -110,6 +149,7 @@ def send_digest(session) -> dict:
     from app.db.schema import BlogPostTable, EmailLogTable
 
     # Fetch posts for the latest batch only (not a mix of all batches)
+    posts_fetch_failed = False
     try:
         latest = session.execute(
             select(BlogPostTable.batch_id)
@@ -129,14 +169,47 @@ def send_digest(session) -> dict:
         session.rollback()
         posts = []
         batch_id = "unknown"
-
-    portfolio_url = os.getenv("PORTFOLIO_URL", "").rstrip("/")
-    subject = f"AI Trend Intelligence — {len(posts)} new insights"
-    html_body = _build_html(posts, portfolio_url)
+        posts_fetch_failed = True
 
     from_addr = os.getenv("EMAIL_FROM", "")
     to_addr = os.getenv("EMAIL_TO", "")
     provider = os.getenv("EMAIL_PROVIDER", "dry_run").lower()
+
+    if posts_fetch_failed:
+        skip_reason = (
+            "Blog posts could not be loaded from the database (query failed); "
+            "digest email was not sent to avoid a misleading empty digest."
+        )
+        start = time.time()
+        result: dict = {
+            "batch_id": batch_id,
+            "post_count": 0,
+            "provider": provider,
+            "status": "skipped",
+            "skip_reason": skip_reason,
+        }
+        result["latency_ms"] = int((time.time() - start) * 1000)
+        try:
+            log = EmailLogTable(
+                batch_id=batch_id,
+                status=result["status"],
+                model_used=provider,
+                skip_reason=skip_reason,
+                details_json=result,
+            )
+            session.add(log)
+            session.commit()
+        except Exception as e:
+            logger.warning("Failed to log email: %s", e)
+            try:
+                session.rollback()
+            except Exception:
+                pass
+        return result
+
+    portfolio_url = os.getenv("PORTFOLIO_URL", "").rstrip("/")
+    subject = f"AI Trend Intelligence — {len(posts)} new insights"
+    html_body = _build_html(posts, portfolio_url)
 
     start = time.time()
     result = {"batch_id": batch_id, "post_count": len(posts), "provider": provider}
@@ -174,7 +247,7 @@ def send_digest(session) -> dict:
             batch_id=batch_id,
             status=result["status"],
             model_used=provider,
-            skip_reason=result.get("error", ""),
+            skip_reason=result.get("skip_reason") or result.get("error", ""),
             details_json=result,
         )
         session.add(log)

@@ -41,10 +41,10 @@ def _extract_images_from_html(html: str) -> list[ArticleImage]:
     try:
         soup = BeautifulSoup(html, "html.parser")
         for img in soup.find_all("img"):
-            src = (img.get("src") or "").strip()
+            src = str(img.get("src") or "").strip()
             if not src:
                 continue
-            alt = (img.get("alt") or "").strip()
+            alt = str(img.get("alt") or "").strip()
             images.append(ArticleImage(src=src, alt=alt))
     except Exception:
         pass
@@ -111,6 +111,13 @@ class RSSScraper(BaseScraper):
             except Exception as e:
                 logger.warning("Failed to fetch feed %s: %s", feed_url, e)
                 continue
+
+            if getattr(parsed, "bozo", False):
+                logger.warning(
+                    "Feed parse issue for %s (feedparser bozo): %s",
+                    feed_url,
+                    getattr(parsed, "bozo_exception", None),
+                )
 
             for entry in getattr(parsed, "entries", []):
                 link = (getattr(entry, "link", None) or "").strip()

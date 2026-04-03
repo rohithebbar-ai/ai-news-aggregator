@@ -6,15 +6,17 @@ Run: uv run python -m app.db.schema
 
 from __future__ import annotations
 
-import os
 from datetime import datetime
 
 from dotenv import load_dotenv
 import uuid as _uuid
 
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Index, String, Text, create_engine, text
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from app.config import EMBEDDING_DIMENSION
+from app.db.connection import get_engine
 
 from pgvector.sqlalchemy import Vector  # type: ignore[import-untyped]
 
@@ -45,7 +47,7 @@ class ArticleTable(Base):
     raw_content: Mapped[str] = mapped_column(Text, nullable=False, default="")
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     image: Mapped[str | None] = mapped_column(Text, nullable=True)
-    images: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    images: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     source_type: Mapped[str] = mapped_column(Text, nullable=False)
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
@@ -71,7 +73,7 @@ class ArticleEmbeddingTable(Base):
     article_id: Mapped[_uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("articles.id", ondelete="CASCADE"), unique=True, nullable=False
     )
-    embedding = mapped_column(Vector(384), nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIMENSION), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("NOW()"))
 
 
@@ -154,15 +156,11 @@ class EvalLogTable(Base):
 
 def create_all_tables() -> None:
     """Create all tables and enable pgvector. Uses DATABASE_URL from env."""
-    url = os.getenv("DATABASE_URL")
-    if not url:
-        raise RuntimeError("DATABASE_URL environment variable is not set")
-    engine = create_engine(url)
+    engine = get_engine()
     with engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         conn.commit()
     Base.metadata.create_all(engine)
-    engine.dispose()
 
 
 if __name__ == "__main__":

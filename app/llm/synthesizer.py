@@ -19,6 +19,23 @@ from app.llm.groq_client import call_llm_json
 
 logger = logging.getLogger(__name__)
 
+
+def _parse_valid_article_ids(raw: Any) -> list[uuid.UUID]:
+    """Keep only well-formed UUIDs from LLM output; skip hallucinated or malformed strings."""
+    out: list[uuid.UUID] = []
+    if not isinstance(raw, list):
+        return out
+    for item in raw:
+        try:
+            if isinstance(item, uuid.UUID):
+                out.append(item)
+            else:
+                out.append(uuid.UUID(str(item).strip()))
+        except (ValueError, TypeError, AttributeError):
+            logger.warning("Skipping invalid article_id from theme JSON: %r", item)
+    return out
+
+
 SYSTEM_PROMPT = """You are an AI trend analyst. Given a theme with its current articles and historically similar articles retrieved from our database, produce an insight analysis.
 
 Return a JSON object with exactly these fields:
@@ -57,7 +74,7 @@ def _get_latest_themes(session: Session) -> tuple[str, list[dict[str, Any]]]:
     return latest_batch_id, themes
 
 
-def _get_article_urls(session: Session, article_ids: list[uuid.UUID | str]) -> dict[str, str]:
+def _get_article_urls(session: Session, article_ids: list[uuid.UUID]) -> dict[str, str]:
     if not article_ids:
         return {}
     stmt = select(ArticleTable.id, ArticleTable.url).where(ArticleTable.id.in_(article_ids))
@@ -69,11 +86,12 @@ def _build_user_prompt(
     theme: dict[str, Any],
     article_urls: dict[str, str],
     historical: list[dict[str, Any]],
+    article_ids: list[uuid.UUID],
 ) -> str:
     parts = [f"Theme: {theme.get('theme_name', 'unknown')}"]
     parts.append(f"Description: {theme.get('description', '')}")
     parts.append("Current articles:")
-    for aid in theme.get("article_ids", []):
+    for aid in article_ids:
         url = article_urls.get(str(aid), f"article #{aid}")
         parts.append(f"  - {url}")
     if historical:
@@ -103,7 +121,7 @@ def run() -> None:
             return
         logger.info("Synthesizing insights for %d themes (batch %s) …", len(themes), batch_id)
         for theme in themes:
-            article_ids = theme.get("article_ids", [])
+            article_ids = _parse_valid_article_ids(theme.get("article_ids", []))
             article_urls = _get_article_urls(session, article_ids)
             theme_name = theme.get("theme_name", "")
             try:
@@ -111,7 +129,7 @@ def run() -> None:
             except Exception as e:
                 logger.warning("RAG search failed for theme '%s': %s", theme_name, e)
                 historical = []
-            prompt = _build_user_prompt(theme, article_urls, historical)
+            prompt = _build_user_prompt(theme, article_urls, historical, article_ids)
             try:
                 insight = call_llm_json(SYSTEM_PROMPT, prompt)
                 _persist_insight(session, batch_id, insight)

@@ -86,15 +86,19 @@ Return ONLY valid JSON. No explanation outside the JSON."""
 
 def _get_latest_insights(session: Session) -> tuple[str, list[dict]]:
     """Return (batch_id, list of insight_json) for the most recent batch."""
-    rows = session.execute(
-        select(InsightTable.batch_id, InsightTable.insight_json)
+    batch_id = session.execute(
+        select(InsightTable.batch_id)
         .order_by(InsightTable.created_at.desc())
-    ).all()
-    if not rows:
+        .limit(1)
+    ).scalar_one_or_none()
+    if not batch_id:
         return "", []
-    batch_id = rows[0].batch_id
-    insights = [r.insight_json for r in rows if r.batch_id == batch_id]
-    return batch_id, insights
+    rows = session.execute(
+        select(InsightTable.insight_json)
+        .where(InsightTable.batch_id == batch_id)
+        .order_by(InsightTable.created_at.desc())
+    ).scalars().all()
+    return batch_id, list(rows)
 
 
 def _get_evidence_articles(session: Session, evidence_urls: list[str]) -> list[dict]:
@@ -138,7 +142,7 @@ def _build_prompt(insight: dict, articles: list[dict]) -> str:
 def _save_post(session: Session, batch_id: str, post: dict, evidence_articles: list[dict] | None = None) -> None:
     base_slug = post.get("slug", "post")[:60]
     # Ensure slug uniqueness: try base, then base-batchprefix, then base-batchprefix-N
-    slug = base_slug
+    slug: str | None = None
     for suffix in ["", f"-{batch_id[:8]}"] + [f"-{batch_id[:8]}-{i}" for i in range(2, 10)]:
         candidate = f"{base_slug}{suffix}"
         exists = session.execute(
@@ -147,6 +151,12 @@ def _save_post(session: Session, batch_id: str, post: dict, evidence_articles: l
         if not exists:
             slug = candidate
             break
+
+    if slug is None:
+        raise RuntimeError(
+            f"All slug candidates exhausted for base slug {base_slug!r} (batch {batch_id!r}); "
+            "every variant from base through suffix -9 is already taken in blog_posts."
+        )
 
     sources = [
         {"title": a["title"], "url": a["url"]}

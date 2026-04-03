@@ -39,17 +39,6 @@ dev = [
 python_version = "3.11"
 ignore_missing_imports = true
 
-[[tool.mypy.overrides]]
-module = "app.ingestion.youtube_scraper"
-disable_error_code = ["misc"]
-
-[[tool.mypy.overrides]]
-module = "app.ingestion.rss_scraper"
-disable_error_code = ["misc"]
-
-[tool.ruff.lint]
-per-file-ignores = { "app/agent/agent_loop.py" = ["E402"], "tests/test_setup.py" = ["F541"] }
-
 [tool.uv]
 constraint-dependencies = [
     "onnxruntime<1.20.0",

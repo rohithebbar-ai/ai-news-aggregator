@@ -125,6 +125,34 @@ def _merge_themes(intermediate_themes: list[dict]) -> list[dict]:
     return themes
 
 
+def _filter_themes_to_existing_articles(session: Session, themes: list[dict]) -> list[dict]:
+    """
+    Keep only article_ids that exist in ArticleTable; drop themes with no ids left.
+    """
+    filtered_themes: list[dict] = []
+    for theme in themes:
+        raw_ids = theme.get("article_ids", [])
+        if not isinstance(raw_ids, list):
+            raw_ids = []
+        candidate_uuids: list[uuid.UUID] = []
+        for x in raw_ids:
+            try:
+                candidate_uuids.append(uuid.UUID(str(x).strip()))
+            except (ValueError, AttributeError, TypeError):
+                continue
+        if not candidate_uuids:
+            continue
+        stmt = select(ArticleTable.id).where(ArticleTable.id.in_(candidate_uuids))
+        existing = set(session.execute(stmt).scalars().all())
+        kept = [str(aid) for aid in candidate_uuids if aid in existing]
+        if not kept:
+            continue
+        updated = dict(theme)
+        updated["article_ids"] = kept
+        filtered_themes.append(updated)
+    return filtered_themes
+
+
 def _persist_themes(session: Session, batch_id: str, themes: list[dict]) -> None:
     for theme in themes:
         row = ThemeTable(batch_id=batch_id, theme_json=theme)
@@ -175,6 +203,11 @@ def run() -> None:
                 themes = all_intermediate_themes
         else:
             themes = all_intermediate_themes
+
+        themes = _filter_themes_to_existing_articles(session, themes)
+        if not themes:
+            logger.error("No themes left after filtering article_ids — aborting persist.")
+            return
 
         batch_id = uuid.uuid4().hex[:16]
         _persist_themes(session, batch_id, themes)

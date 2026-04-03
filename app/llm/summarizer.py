@@ -82,6 +82,7 @@ def run() -> None:
             print("No unsummarized articles.")
             return
         logger.info("Summarizing %d articles …", len(rows))
+        success_count = 0
         for row in rows:
             body = (row["raw_content"] or "").strip()
             if not body:
@@ -89,10 +90,11 @@ def run() -> None:
             try:
                 result = summarize_article(row["title"], body)
                 _persist_summary(session, row["id"], result)
+                success_count += 1
                 logger.info("  Summarized: %s", row["title"][:60])
             except Exception as e:
                 logger.error("  Failed to summarize article %s: %s", row["id"], e)
-    print(f"Summarized {len(rows)} articles.")
+    print(f"Summarized {success_count} articles.")
 
 
 if __name__ == "__main__":

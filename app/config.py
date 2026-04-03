@@ -5,6 +5,18 @@ Define RSS feed URLs and YouTube channel IDs to scrape.
 
 from __future__ import annotations
 
+import os
+
+# ---------------------------------------------------------------------------
+# Embeddings — must match sentence-transformers model output (all-MiniLM-L6-v2 → 384)
+# ---------------------------------------------------------------------------
+EMBEDDING_DIMENSION: int = int(os.getenv("EMBEDDING_DIMENSION", "384"))
+
+# ---------------------------------------------------------------------------
+# Eval — coherence judge uses a different model than synthesis (H-11)
+# ---------------------------------------------------------------------------
+COHERENCE_EVAL_MODEL: str = os.getenv("GROQ_COHERENCE_MODEL", "llama-3.1-8b-instant")
+
 # ---------------------------------------------------------------------------
 # RSS Feeds — AI-focused blogs and research outlets
 # ---------------------------------------------------------------------------

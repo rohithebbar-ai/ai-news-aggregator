@@ -7,22 +7,29 @@ Usage: uv run python -m app.embeddings.embed_service
 """
 
 import logging
+import threading
+from typing import Any
 
-
-from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = "all-MiniLM-L6-v2"
-_model: SentenceTransformer | None = None
+# Lazy-loaded: importing sentence_transformers pulls torch + heavy deps; defer until first embed.
+_model: Any = None
+_model_lock = threading.Lock()
 
 
-def _get_model() -> SentenceTransformer:
+def _get_model() -> Any:
     global _model
-    if _model is None:
-        logger.info("Loading embedding model %s …", MODEL_NAME)
-        _model = SentenceTransformer(MODEL_NAME)
+    if _model is not None:
+        return _model
+    with _model_lock:
+        if _model is None:
+            from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
+
+            logger.info("Loading embedding model %s …", MODEL_NAME)
+            _model = SentenceTransformer(MODEL_NAME)
     return _model
 
 

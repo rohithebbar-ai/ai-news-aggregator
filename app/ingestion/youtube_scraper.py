@@ -87,6 +87,13 @@ class YouTubeScraper(BaseScraper):
                 logger.warning("Failed to fetch YouTube feed %s: %s", feed_url, e)
                 continue
 
+            if getattr(parsed, "bozo", False):
+                logger.warning(
+                    "YouTube feed parse issue for %s (feedparser bozo): %s",
+                    feed_url,
+                    getattr(parsed, "bozo_exception", None),
+                )
+
             for entry in getattr(parsed, "entries", []):
                 link = (getattr(entry, "link", None) or "").strip()
                 video_id = _video_id_from_link(link)
