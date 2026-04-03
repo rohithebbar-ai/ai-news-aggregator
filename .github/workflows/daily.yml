@@ -18,42 +18,62 @@ jobs:
         run: pip install uv
       - name: Install dependencies
         run: uv sync
+      - name: Preflight required secrets
+        id: preflight
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          if [ -n "$DATABASE_URL" ] && [ -n "$GROQ_API_KEY" ]; then
+            echo "run_pipeline=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Skipping Daily Pipeline because DATABASE_URL or GROQ_API_KEY is missing."
+            echo "run_pipeline=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Ingest
+        if: steps.preflight.outputs.run_pipeline == 'true'
         run: uv run python main.py ingest
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       - name: Embed
+        if: steps.preflight.outputs.run_pipeline == 'true'
         run: uv run python main.py embed
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       - name: Summarize
+        if: steps.preflight.outputs.run_pipeline == 'true'
         run: uv run python main.py summarize
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       - name: Group themes
+        if: steps.preflight.outputs.run_pipeline == 'true'
         run: uv run python main.py group
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       - name: Agent synthesis
+        if: steps.preflight.outputs.run_pipeline == 'true'
         run: uv run python main.py agent
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       - name: Blog generation
+        if: steps.preflight.outputs.run_pipeline == 'true'
         run: uv run python main.py blog
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       - name: Evaluate insights
+        if: steps.preflight.outputs.run_pipeline == 'true'
         run: uv run python main.py eval
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       - name: Email digest
+        if: steps.preflight.outputs.run_pipeline == 'true'
         run: uv run python main.py email
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
