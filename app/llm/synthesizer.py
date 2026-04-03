@@ -36,14 +36,24 @@ def _parse_valid_article_ids(raw: Any) -> list[uuid.UUID]:
     return out
 
 
-SYSTEM_PROMPT = """You are an AI trend analyst. Given a theme with its current articles and historically similar articles retrieved from our database, produce an insight analysis.
+SYSTEM_PROMPT = """You are an AI trend analyst producing intelligence reports for a professional audience.
+
+Given a theme and its supporting articles, produce a detailed insight analysis.
+
+QUALITY RULES — your output MUST follow all of these:
+- Name specific companies, products, model versions, and benchmark results from the articles. No vague phrases like "leading AI companies" or "significant developments".
+- The `analysis` field must contain at least 3 concrete named entities (company names, model names, version numbers, or specific metrics).
+- The `evidence` field must list the exact URLs of the articles most relevant to this theme.
+- The `historical_context` must reference something specific from the past (a named earlier model, a previous year's benchmark, a prior company announcement).
+- If the articles contain numbers or metrics (accuracy %, latency ms, parameter count, cost), include them.
+- Do NOT use filler phrases: "remains to be seen", "rapidly evolving", "game-changing", "significant implications", "exciting developments".
 
 Return a JSON object with exactly these fields:
 {
-  "trend_name": "<concise trend name>",
-  "analysis": "<2-3 paragraph analysis of this trend>",
+  "trend_name": "<concise name — must mention the specific technology or company driving the trend>",
+  "analysis": "<3 paragraphs: (1) what specifically happened and who did it, (2) technical details and numbers from the evidence, (3) second-order effects and who is affected>",
   "evidence": ["<url1>", "<url2>", ...],
-  "historical_context": "<how this trend compares to what we've seen before>",
+  "historical_context": "<concrete comparison: name a prior model/event/year and how this differs>",
   "confidence_level": "<high|medium|low>",
   "direction": "<accelerating|stable|emerging|declining>"
 }
@@ -74,17 +84,32 @@ def _get_latest_themes(session: Session) -> tuple[str, list[dict[str, Any]]]:
     return latest_batch_id, themes
 
 
-def _get_article_urls(session: Session, article_ids: list[uuid.UUID]) -> dict[str, str]:
+def _get_article_details(
+    session: Session, article_ids: list[uuid.UUID]
+) -> dict[str, dict[str, Any]]:
+    """Return a mapping of article_id → {url, title, published_at} for the given IDs."""
     if not article_ids:
         return {}
-    stmt = select(ArticleTable.id, ArticleTable.url).where(ArticleTable.id.in_(article_ids))
+    stmt = select(ArticleTable.id, ArticleTable.url, ArticleTable.title, ArticleTable.published_at).where(
+        ArticleTable.id.in_(article_ids)
+    )
     rows = session.execute(stmt).all()
-    return {str(r.id): r.url for r in rows}
+    result: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        pub = r.published_at.date().isoformat() if r.published_at else "unknown date"
+        result[str(r.id)] = {"url": r.url, "title": r.title, "published_at": pub}
+    return result
+
+
+def _get_article_urls(session: Session, article_ids: list[uuid.UUID]) -> dict[str, str]:
+    """Thin wrapper kept for backward compatibility with agent_loop.py."""
+    details = _get_article_details(session, article_ids)
+    return {aid: d["url"] for aid, d in details.items()}
 
 
 def _build_user_prompt(
     theme: dict[str, Any],
-    article_urls: dict[str, str],
+    article_details: dict[str, dict[str, Any]],
     historical: list[dict[str, Any]],
     article_ids: list[uuid.UUID],
 ) -> str:
@@ -92,8 +117,14 @@ def _build_user_prompt(
     parts.append(f"Description: {theme.get('description', '')}")
     parts.append("Current articles:")
     for aid in article_ids:
-        url = article_urls.get(str(aid), f"article #{aid}")
-        parts.append(f"  - {url}")
+        detail = article_details.get(str(aid))
+        if detail:
+            title = detail.get("title", "Untitled")
+            pub = detail.get("published_at", "unknown date")
+            url = detail.get("url", f"article #{aid}")
+            parts.append(f"  - {title} (published: {pub}) — {url}")
+        else:
+            parts.append(f"  - article #{aid}")
     if historical:
         parts.append("\nHistorically similar articles from our database:")
         for h in historical:
@@ -122,14 +153,14 @@ def run() -> None:
         logger.info("Synthesizing insights for %d themes (batch %s) …", len(themes), batch_id)
         for theme in themes:
             article_ids = _parse_valid_article_ids(theme.get("article_ids", []))
-            article_urls = _get_article_urls(session, article_ids)
+            article_details = _get_article_details(session, article_ids)
             theme_name = theme.get("theme_name", "")
             try:
                 historical = search_by_text(session, theme_name, top_k=5)
             except Exception as e:
                 logger.warning("RAG search failed for theme '%s': %s", theme_name, e)
                 historical = []
-            prompt = _build_user_prompt(theme, article_urls, historical, article_ids)
+            prompt = _build_user_prompt(theme, article_details, historical, article_ids)
             try:
                 insight = call_llm_json(SYSTEM_PROMPT, prompt)
                 _persist_insight(session, batch_id, insight)

@@ -10,16 +10,58 @@ Usage: uv run python -m app.publishing.blog_generator
 """
 
 import logging
+import re
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.schema import ArticleTable, BlogPostTable, InsightTable
+from app.db.schema import ArticleTable, ArticleSummaryTable, BlogPostTable, InsightTable
 from app.llm.groq_client import call_llm_json
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a technical blog writer for an AI trend intelligence platform.
+# Load style profile at module level — injected at top of SYSTEM_PROMPT
+_STYLE_PROFILE_PATH = Path(__file__).parent / "style_profile.md"
+_STYLE_PROFILE: str = (
+    _STYLE_PROFILE_PATH.read_text(encoding="utf-8") if _STYLE_PROFILE_PATH.exists() else ""
+)
+
+# Temperature for the final body generation pass — lower than creative writing, higher than factual lookup
+_BODY_TEMPERATURE = 0.3
+
+# Phrases that disqualify a generated title (compare against title.lower(); keep aligned with style_profile.md)
+_BANNED_TITLE_PHRASES = [
+    "rapidly evolving",
+    "advancements in ai",  # narrow: bans generic "Advancements in AI" titles, not "advancements in <other field>"
+    "game-changing",
+    "revolutionary",
+    "the future of",
+]
+
+_SLUG_STOPWORDS = {
+    "the", "a", "an", "and", "or", "but", "in", "on", "at", "to",
+    "of", "for", "is", "are", "was", "were", "be", "it", "its",
+}
+
+
+def _extract_key_facts(raw_content: str, max_facts: int = 3) -> list[str]:
+    """Extract short factual sentences containing numbers or named entities from raw text."""
+    if not raw_content:
+        return []
+    sentences = re.split(r'(?<=[.!?])\s+', raw_content[:3000])
+    facts = []
+    for s in sentences:
+        s = s.strip()
+        if len(s) < 20 or len(s) > 120:
+            continue
+        if re.search(r'\d|%|v\d|\bv\d+\b', s) or re.search(r'[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+', s):
+            facts.append(s)
+        if len(facts) >= max_facts:
+            break
+    return facts
+
+SYSTEM_PROMPT = _STYLE_PROFILE[:600] + "\n\n---\n\n" + """You are a technical blog writer for an AI trend intelligence platform.
 
 Given an insight and its source articles (with image URLs), write a full markdown blog post.
 
@@ -83,6 +125,32 @@ Mermaid syntax rules — follow exactly:
 
 Return ONLY valid JSON. No explanation outside the JSON."""
 
+TITLE_LEDE_PROMPT = """You are a headline editor for an AI trend intelligence newsletter.
+
+Given an insight and its source articles, produce a punchy title and opening lede only.
+
+Rules:
+- Title MUST name the specific company, product, or model version driving the trend. No generic phrases.
+- Lede (1 sentence): state the single most important fact from the evidence — who did what and why it matters.
+- BAD title: "The Rise of Agentic AI"
+- GOOD title: "Anthropic Releases Claude 3.5 Haiku with 3x Faster Tool Use Than GPT-4o mini"
+
+Return ONLY valid JSON:
+{"title": "<headline>", "lede": "<one sentence opening>"}"""
+
+OUTLINE_PROMPT = """You are a structural editor for an AI trend intelligence blog.
+
+Given an insight and its source articles, return a JSON outline for the blog post.
+
+Return a JSON object with exactly these fields:
+{
+  "title": "<specific title naming the product, company, or mechanism — no generic phrases>",
+  "sections": ["<intro thesis>", "<key development 1>", "<key development 2>", "<historical framing>", "<implications>"],
+  "key_facts": ["<fact with company/version/number>", "<fact>", "<fact>"]
+}
+
+Return ONLY valid JSON. No explanation outside the JSON."""
+
 
 def _get_latest_insights(session: Session) -> tuple[str, list[dict]]:
     """Return (batch_id, list of insight_json) for the most recent batch."""
@@ -102,14 +170,42 @@ def _get_latest_insights(session: Session) -> tuple[str, list[dict]]:
 
 
 def _get_evidence_articles(session: Session, evidence_urls: list[str]) -> list[dict]:
-    """Fetch title and og:image for each evidence URL."""
+    """Fetch title, og:image, published_at, source_type, one_sentence_summary, and key facts for each evidence URL."""
     if not evidence_urls:
         return []
     rows = session.execute(
-        select(ArticleTable.title, ArticleTable.url, ArticleTable.image)
+        select(
+            ArticleTable.title,
+            ArticleTable.url,
+            ArticleTable.image,
+            ArticleTable.published_at,
+            ArticleTable.source_type,
+            ArticleTable.raw_content,
+            ArticleSummaryTable.summary_json,
+        )
+        .outerjoin(ArticleSummaryTable, ArticleSummaryTable.article_id == ArticleTable.id)
         .where(ArticleTable.url.in_(evidence_urls))
     ).all()
-    return [{"title": r.title, "url": r.url, "image": r.image} for r in rows]
+
+    result = []
+    for r in rows:
+        summary: str | None = None
+        if r.summary_json:
+            summary = (
+                r.summary_json.get("one_sentence_summary")
+                or (r.summary_json.get("summary") or "")[:200]
+                or None
+            )
+        result.append({
+            "title": r.title,
+            "url": r.url,
+            "image": r.image,
+            "published_at": r.published_at,
+            "source_type": r.source_type,
+            "summary": summary,
+            "key_facts": _extract_key_facts(r.raw_content or ""),
+        })
+    return result
 
 
 def _build_prompt(insight: dict, articles: list[dict]) -> str:
@@ -136,7 +232,90 @@ def _build_prompt(insight: dict, articles: list[dict]) -> str:
     if second:
         lines.append(f"second_image_url={second['image']} | second_title={second['title']} | second_url={second['url']}")
 
+    lines.append("\nArticle summaries:")
+    for a in articles[:5]:
+        pub = a.get("published_at")
+        pub_str = pub.strftime("%Y-%m-%d") if pub else "unknown"
+        summary_text = a.get("summary") or "no summary"
+        lines.append(f"  - {a['title']} ({pub_str}): {summary_text}")
+
+    facts_articles = [a for a in articles[:5] if a.get("key_facts")]
+    if facts_articles:
+        lines.append("\nKey facts from articles:")
+        for a in facts_articles:
+            facts_str = " | ".join(a["key_facts"])
+            lines.append(f"  - {a['title']}: {facts_str}")
+
     return "\n".join(lines)
+
+
+def _generate_outline(insight: dict, articles: list[dict]) -> dict:
+    """First-pass structural outline; result is injected into the full-draft prompt."""
+    prompt = _build_prompt(insight, articles)
+    return call_llm_json(OUTLINE_PROMPT, prompt, temperature=_BODY_TEMPERATURE)
+
+
+def _generate_title_lede(insight: dict, articles: list[dict]) -> dict:
+    """Separate LLM call at lower temperature focused solely on headline and lede."""
+    prompt = _build_prompt(insight, articles)
+    return call_llm_json(TITLE_LEDE_PROMPT, prompt, temperature=0.2)
+
+
+def _validate_mermaid(markdown: str) -> str:
+    """Remove malformed mermaid blocks rather than rendering broken diagrams."""
+    pattern = r"```mermaid\s*\n(.*?)```"
+
+    def check_block(match: re.Match) -> str:
+        body = match.group(1)
+        lines = [l.strip() for l in body.splitlines() if l.strip()]
+        for line in lines:
+            if "|>" in line:
+                logger.warning("Mermaid block removed: invalid edge label '|>' in: %r", line)
+                return ""
+            if re.search(r'[:"\/\\]', line):
+                logger.warning("Mermaid block removed: special char in label: %r", line)
+                return ""
+        if len(lines) > 10:
+            logger.warning("Mermaid block removed: too many lines (%d)", len(lines))
+            return ""
+        return match.group(0)
+
+    return re.sub(pattern, check_block, markdown, flags=re.DOTALL)
+
+
+def _validate_post(post: dict, insight: dict) -> tuple[bool, str]:
+    """Return (ok, reason). Enforces minimum quality before saving."""
+    markdown = post.get("markdown", "")
+    title = post.get("title", "").lower()
+
+    word_count = len(markdown.split())
+    if word_count < 300:
+        return False, f"Too short: {word_count} words (minimum 300)"
+
+    evidence_urls = insight.get("evidence", [])
+    # If the insight has no evidence URLs, we cannot require links in the body — skip this check.
+    # Intentional: empty evidence is an upstream data issue, not something _validate_post can fix here.
+    if evidence_urls and not any(url in markdown for url in evidence_urls):
+        return False, "No evidence URLs cited in markdown body"
+
+    for phrase in _BANNED_TITLE_PHRASES:
+        if phrase in title:
+            return False, f"Banned phrase in title: '{phrase}'"
+
+    slug = post.get("slug", "").strip().lower()
+    if not slug:
+        return False, "Post has no slug"
+    if slug:
+        slug_words = [w for w in slug.split("-") if w]
+        meaningful = [w for w in slug_words if w not in _SLUG_STOPWORDS]
+        if not meaningful:
+            return False, f"Slug contains only stopwords: '{slug}'"
+        if len(slug) < 10:
+            return False, f"Slug too short: '{slug}' (minimum 10 chars)"
+        if slug.startswith("-") or slug.endswith("-"):
+            return False, f"Slug has leading/trailing hyphen: '{slug}'"
+
+    return True, ""
 
 
 def _save_post(session: Session, batch_id: str, post: dict, evidence_articles: list[dict] | None = None) -> None:
@@ -188,12 +367,29 @@ def run() -> None:
 
         logger.info("Generating blog posts for %d insights (batch %s)", len(insights), batch_id)
         success = 0
+        rejected = 0
         for insight in insights:
             evidence_urls = insight.get("evidence", [])
             articles = _get_evidence_articles(session, evidence_urls)
             prompt = _build_prompt(insight, articles)
             try:
-                post = call_llm_json(SYSTEM_PROMPT, prompt, temperature=0.5)
+                outline = _generate_outline(insight, articles)
+                outline_section = (
+                    f"\nOutline to follow:\n"
+                    f"  Title: {outline.get('title', '')}\n"
+                    f"  Sections: {', '.join(outline.get('sections', []))}\n"
+                    f"  Key facts: {'; '.join(outline.get('key_facts', []))}"
+                )
+                tl = _generate_title_lede(insight, articles)
+                outline_section += f"\n  Suggested title: {tl.get('title', '')}\n  Opening lede: {tl.get('lede', '')}"
+                post = call_llm_json(SYSTEM_PROMPT, prompt + outline_section, temperature=_BODY_TEMPERATURE)
+                if post.get("markdown"):
+                    post["markdown"] = _validate_mermaid(post["markdown"])
+                ok, reason = _validate_post(post, insight)
+                if not ok:
+                    logger.warning("Post rejected for '%s': %s", insight.get("trend_name", "?"), reason)
+                    rejected += 1
+                    continue
                 with session.begin_nested():
                     _save_post(session, batch_id, post, evidence_articles=articles)
                 logger.info("%s", post.get("title", "?"))
@@ -201,7 +397,7 @@ def run() -> None:
             except Exception as e:
                 logger.error("Failed for insight '%s': %s", insight.get("trend_name", "?"), e)
 
-    print(f"Blog generation complete: {success}/{len(insights)} posts created for batch {batch_id}.")
+    print(f"Blog generation complete: {success}/{len(insights)} posts created, {rejected} rejected for batch {batch_id}.")
 
 
 if __name__ == "__main__":
